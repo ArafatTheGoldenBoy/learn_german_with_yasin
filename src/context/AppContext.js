@@ -8,12 +8,16 @@ export const AppContext = createContext();
 export const AppProvider = ({ children }) => {
   const STORAGE_KEY = '@my_translate_quiz_app_categories';
 
-  // 1. categories = [ { name, words: [ { original, lang, en, bn, de }, … ] }, … ]
+  // 1. categories array: each { name, words: [ { original, lang, en, bn, de }, … ] }
   const [categories, setCategories] = useState([]);
-  // 2. Which category is selected (for WordList/deleteWord/etc.)
+  // 2. Which category is currently “active”
   const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0);
 
-  // Load categories from AsyncStorage on mount
+  // 3. quizAnswered: { [categoryIndex: number]: Set<wordIndex:number> }
+  //    Tracks which words in each category have been answered correctly this session
+  const [quizAnswered, setQuizAnswered] = useState({});
+
+  // On mount, load categories (and leave quizAnswered empty)
   useEffect(() => {
     (async () => {
       try {
@@ -36,7 +40,7 @@ export const AppProvider = ({ children }) => {
     })();
   }, []);
 
-  // Helper to persist categories
+  // Persist categories whenever they change
   const persistCategories = async (newCats) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newCats));
@@ -46,7 +50,7 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  // addCategory(name)
+  // Add a new category
   const addCategory = async (name) => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('ValidationError');
@@ -55,7 +59,7 @@ export const AppProvider = ({ children }) => {
     setCategories(newCats);
   };
 
-  // updateCategoryName(index, newName)
+  // Rename a category
   const updateCategoryName = async (index, newName) => {
     if (index < 0 || index >= categories.length) throw new Error('InvalidIndex');
     const trimmed = newName.trim();
@@ -67,25 +71,36 @@ export const AppProvider = ({ children }) => {
     setCategories(newCats);
   };
 
-  // deleteCategory(index)
+  // Delete a category
   const deleteCategory = async (index) => {
     if (index < 0 || index >= categories.length) return;
     const newCats = categories.filter((_, i) => i !== index);
     await persistCategories(newCats);
     setCategories(newCats);
+
+    // Remove its quizAnswered entry
+    setQuizAnswered((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+
+    // If we deleted the selected category, reset to 0
     if (index === selectedCategoryIndex) {
       setSelectedCategoryIndex(0);
     }
   };
 
-  // addManualWordToCategory(english, german, overrideIndex)
+  // Add a word manually (English + German) to a specific category
   const addManualWordToCategory = async (
     english,
     german,
     overrideCategoryIndex = null
   ) => {
     const index =
-      overrideCategoryIndex !== null ? overrideCategoryIndex : selectedCategoryIndex;
+      overrideCategoryIndex !== null
+        ? overrideCategoryIndex
+        : selectedCategoryIndex;
     const cat = categories[index];
     if (!cat) {
       console.warn('addManualWordToCategory: invalid category index', index);
@@ -106,65 +121,68 @@ export const AppProvider = ({ children }) => {
     );
     await persistCategories(newCats);
     setCategories(newCats);
+
+    // Reset that category’s quiz progress if it exists
+    setQuizAnswered((prev) => {
+      const next = { ...prev };
+      if (next[index]) {
+        delete next[index];
+      }
+      return next;
+    });
   };
 
-  // deleteWord(wordIndex)
-  const deleteWord = async (wordIndex) => {
-    const cat = categories[selectedCategoryIndex];
+  // Delete a word (by its index in the selected category)
+  const deleteWordFromCategory = async (categoryIdx, wordIdx) => {
+    const cat = categories[categoryIdx];
     if (!cat) return;
-    const updatedWords = cat.words.filter((_, i) => i !== wordIndex);
+    const updatedWords = cat.words.filter((_, i) => i !== wordIdx);
     const newCats = categories.map((c, i) =>
-      i === selectedCategoryIndex ? { ...c, words: updatedWords } : c
+      i === categoryIdx ? { ...c, words: updatedWords } : c
     );
     await persistCategories(newCats);
     setCategories(newCats);
+
+    // If that word was answered, remove it from quizAnswered
+    setQuizAnswered((prev) => {
+      const next = { ...prev };
+      if (next[categoryIdx]) {
+        next[categoryIdx].delete(wordIdx);
+        // Also shift down any higher indices in that Set by 1
+        const updatedSet = new Set(
+          Array.from(next[categoryIdx]).map((idx) =>
+            idx > wordIdx ? idx - 1 : idx
+          )
+        );
+        next[categoryIdx] = updatedSet;
+      }
+      return next;
+    });
   };
 
-  // ==== RE-ADD THESE TWO HELPERS ====
-
-  // getRandomWord() → pick a random word object from the selected category
-  const getRandomWord = () => {
-    const cat = categories[selectedCategoryIndex];
-    if (!cat || !cat.words || cat.words.length === 0) return null;
-    const shuffled = [...cat.words];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled[0];
+  //
+  // QUIZ PROGRESS HELPERS
+  //
+  // Mark a word (by its index in that category) as answered correctly
+  const markWordCorrect = (categoryIdx, wordIdx) => {
+    setQuizAnswered((prev) => {
+      const next = { ...prev };
+      if (!next[categoryIdx]) {
+        next[categoryIdx] = new Set();
+      }
+      next[categoryIdx].add(wordIdx);
+      return next;
+    });
   };
 
-  // getQuizOptions(word, optionCount = 4) → return an array of German options for a given word.
-  const getQuizOptions = (word, optionCount = 4) => {
-    const cat = categories[selectedCategoryIndex];
-    if (!cat || !cat.words) return [];
-    const correct = word.de || '';
-    // Collect other German translations from this category (excluding the correct word)
-    const otherGerman = cat.words
-      .filter((w) => w !== word && w.de)
-      .map((w) => w.de);
-    // Shuffle
-    for (let i = otherGerman.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [otherGerman[i], otherGerman[j]] = [otherGerman[j], otherGerman[i]];
-    }
-
-    const choices = [correct];
-    for (let i = 0; i < optionCount - 1 && i < otherGerman.length; i++) {
-      choices.push(otherGerman[i]);
-    }
-    while (choices.length < optionCount) {
-      choices.push(correct + ' ’'); // dummy distractor
-    }
-    // Final shuffle of the assembled array
-    for (let i = choices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [choices[i], choices[j]] = [choices[j], choices[i]];
-    }
-    return choices;
+  // Reset the quiz progress for a category (e.g. when the user restarts or adds a new word)
+  const resetQuizProgress = (categoryIdx) => {
+    setQuizAnswered((prev) => {
+      const next = { ...prev };
+      delete next[categoryIdx];
+      return next;
+    });
   };
-
-  // =====================================
 
   return (
     <AppContext.Provider
@@ -176,10 +194,11 @@ export const AppProvider = ({ children }) => {
         updateCategoryName,
         deleteCategory,
         addManualWordToCategory,
-        deleteWord,
-        // NOW re-expose these again:
-        getRandomWord,
-        getQuizOptions,
+        deleteWordFromCategory,
+        // Quiz progress:
+        quizAnswered,       // the map { [catIdx]: Set(wordIdx) }
+        markWordCorrect,
+        resetQuizProgress,
       }}
     >
       {children}

@@ -4,56 +4,60 @@ import React, {
   useContext,
   useState,
   useEffect,
-  useCallback
+  useCallback,
 } from 'react';
 import {
+  SafeAreaView,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppContext } from '../context/AppContext';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function QuizScreen() {
-  const { categories } = useContext(AppContext);
+  const {
+    categories,
+    selectedCategoryIndex,
+    quizAnswered,
+    markWordCorrect,
+    resetQuizProgress,
+  } = useContext(AppContext);
 
-  //
-  // 1) Flatten all categories’ words into one array of { original, de }:
-  //    Only keep entries that have both nonempty English and German.
-  //
-  const allWords = categories
-    .flatMap((cat) =>
-      cat.words.map((w) => ({
-        original: w.en || w.original,
-        de: w.de,
-      }))
-    )
+  // 1) Grab only the words from the selected category:
+  const currentCategory = categories[selectedCategoryIndex] || { words: [] };
+  const words = currentCategory.words;
+
+  // 2) Build a filtered array of { original, de }:
+  const allWords = words
+    .map((w) => ({
+      original: w.en || w.original,
+      de: w.de,
+    }))
     .filter((w) => w.original && w.de);
 
-  // For debugging:
-  console.log('QuizScreen: allWords.length =', allWords.length);
+  // Debug:
+  console.log(
+    'QuizScreen: category',
+    selectedCategoryIndex,
+    'total words =',
+    allWords.length
+  );
 
-  //
-  // 2) Local state:
-  //    - pool: a shuffled array of indices [0 … N-1], where N = allWords.length
-  //    - initialized: whether we’ve already built the pool once
-  //    - currentIdx: the index into allWords of the question being shown
-  //    - options: the 4 German choices for that question
-  //    - finished: true only when pool is empty
-  //    - hasAlerted: ensures “All Done” shows only once per cycle
-  //
-  const [pool, setPool] = useState([]);
+  // 3) Local state:
+  const [pool, setPool] = useState([]); // shuffled indices
   const [initialized, setInitialized] = useState(false);
   const [currentIdx, setCurrentIdx] = useState(null);
-  const [options, setOptions] = useState([]);
+  const [options, setOptions] = useState([]); // 4 German choices
   const [finished, setFinished] = useState(false);
   const [hasAlerted, setHasAlerted] = useState(false);
+  const [feedback, setFeedback] = useState(''); // "", "Correct!", or "Wrong!"
+  const [showAnswer, setShowAnswer] = useState(false); // whether to reveal correct answer
 
-  //
-  // 3) Utility: shuffle an array in place
-  //
+  // 4) Shuffle utility:
   const shuffleInPlace = (arr) => {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -61,36 +65,32 @@ export default function QuizScreen() {
     }
   };
 
-  //
-  // 4) Build the pool once, the moment allWords.length > 0 and not initialized yet.
-  //
+  // 5) Initialize the pool once when category or its word list changes:
   useEffect(() => {
     const N = allWords.length;
 
-    console.log(
-      'useEffect[allWords.length, initialized]: N =',
-      N,
-      'initialized =',
-      initialized
-    );
+    // Reset this category’s quiz progress whenever words change
+    resetQuizProgress(selectedCategoryIndex);
 
-    if (N > 0 && !initialized) {
-      // Create [0, 1, …, N-1] and shuffle it
+    if (N > 0) {
+      // Build [0..N-1], shuffle
       const indices = Array.from({ length: N }, (_, i) => i);
       shuffleInPlace(indices);
-      console.log('→ Pool initialized to:', indices);
+      console.log('→ Initialized pool to:', indices);
       setPool(indices);
       setFinished(false);
       setCurrentIdx(null);
       setOptions([]);
       setHasAlerted(false);
       setInitialized(true);
+      setFeedback('');
+      setShowAnswer(false);
 
       // Immediately pick the first word
       const first = indices[0];
       setCurrentIdx(first);
 
-      // Build options for that first word:
+      // Build its options
       const correctGerman = allWords[first].de;
       const otherGerman = allWords
         .filter((_, idx) => idx !== first)
@@ -101,38 +101,35 @@ export default function QuizScreen() {
       shuffleInPlace(choiceSet);
       setOptions(choiceSet);
 
-      // Remove the first index from pool
+      // Remove that first index
       setPool(indices.slice(1));
-    }
-
-    if (N === 0) {
-      // No words available → clear everything
-      console.log('→ No words; pool cleared');
+    } else {
+      // No words in this category
+      console.log('→ No words; clearing pool');
       setPool([]);
       setFinished(true);
       setCurrentIdx(null);
       setOptions([]);
       setHasAlerted(false);
       setInitialized(false);
+      setFeedback('');
+      setShowAnswer(false);
     }
-  }, [allWords.length, initialized]);
+  }, [selectedCategoryIndex, allWords.length]);
 
-  //
-  // 5) pickNextWord: called only when user answers correctly
-  //
+  // 6) pickNextWord: called after “Correct!” feedback
   const pickNextWord = useCallback(() => {
+    setShowAnswer(false);
     if (pool.length === 0) {
-      console.log('pickNextWord: pool is empty; set finished = true');
+      console.log('pickNextWord: pool empty → finished');
       setFinished(true);
       return;
     }
-
-    // Pop the first index
     const [next, ...rest] = pool;
     setPool(rest);
     setCurrentIdx(next);
 
-    // Build options: correctGerman + up to 3 random others
+    // Build 4 options for the next word
     const correctGerman = allWords[next].de;
     const otherGerman = allWords
       .filter((_, idx) => idx !== next)
@@ -143,144 +140,215 @@ export default function QuizScreen() {
     shuffleInPlace(choiceSet);
     setOptions(choiceSet);
 
-    console.log('→ next index =', next);
-    console.log('→ correctGerman =', correctGerman);
-    console.log('→ options =', choiceSet);
-    console.log('→ remaining pool =', rest);
+    console.log('→ Next index:', next);
+    console.log('→ Options:', choiceSet);
+    console.log('→ Remaining pool:', rest);
   }, [pool, allWords]);
 
-  //
-  // 6) Show “All Done” alert only when this screen is focused and not alerted yet
-  //
+  // 7) Show “All Done” alert only when this screen is focused and not alerted yet,
+  //    and reset progress before prompting.
   useFocusEffect(
     useCallback(() => {
-      console.log(
-        'useFocusEffect fired; finished =',
-        finished,
-        'hasAlerted =',
-        hasAlerted
-      );
       if (finished && !hasAlerted) {
+        // Clear progress for this category so its circle goes back to 0/total
+        resetQuizProgress(selectedCategoryIndex);
+
         setHasAlerted(true);
-        Alert.alert(
-          'All Done',
-          'You have gone through every word. Do you want to start again?',
-          [
-            {
-              text: 'Yes',
-              onPress: () => {
-                // Rebuild the pool from scratch
-                const N = allWords.length;
-                const fresh = Array.from({ length: N }, (_, i) => i);
-                shuffleInPlace(fresh);
-                console.log('→ Reinitializing pool to:', fresh);
-                setPool(fresh);
-                setFinished(false);
-                setHasAlerted(false);
+        // Small timeout so the “Preparing quiz…” text renders before the alert
+        setTimeout(() => {
+          Alert.alert(
+            'All Done',
+            'You have gone through every word in this category. Start again?',
+            [
+              {
+                text: 'Yes',
+                onPress: () => {
+                  // Rebuild pool for a fresh cycle
+                  const N = allWords.length;
+                  const fresh = Array.from({ length: N }, (_, i) => i);
+                  shuffleInPlace(fresh);
+                  console.log('→ Reinitializing pool to:', fresh);
+                  setPool(fresh);
+                  setFinished(false);
+                  setHasAlerted(false);
+                  setFeedback('');
+                  setShowAnswer(false);
 
-                // Immediately pick first of the new pool:
-                const first = fresh[0];
-                setCurrentIdx(first);
-
-                // Build options for that first word:
-                const correctGerman2 = allWords[first].de;
-                const otherGerman2 = allWords
-                  .filter((_, idx) => idx !== first)
-                  .map((w) => w.de);
-                shuffleInPlace(otherGerman2);
-                const distractors2 = otherGerman2.slice(0, 3);
-                const choiceSet2 = [correctGerman2, ...distractors2];
-                shuffleInPlace(choiceSet2);
-                setOptions(choiceSet2);
-
-                // Remove the first from pool
-                setPool(fresh.slice(1));
+                  // Immediately pick first
+                  const first = fresh[0];
+                  setCurrentIdx(first);
+                  const correctGerman2 = allWords[first].de;
+                  const otherGerman2 = allWords
+                    .filter((_, idx) => idx !== first)
+                    .map((w) => w.de);
+                  shuffleInPlace(otherGerman2);
+                  const distractors2 = otherGerman2.slice(0, 3);
+                  const choiceSet2 = [correctGerman2, ...distractors2];
+                  shuffleInPlace(choiceSet2);
+                  setOptions(choiceSet2);
+                  setPool(fresh.slice(1));
+                },
               },
-            },
-            { text: 'No', style: 'cancel' },
-          ]
-        );
+              { text: 'No', style: 'cancel' },
+            ]
+          );
+        }, 100);
       }
     }, [finished, hasAlerted, allWords.length])
   );
 
-  //
-  // 7) Handler when the user taps one of the German options
-  //
+  // 8) Handle answer taps
   const handleAnswer = (chosen) => {
     if (currentIdx === null) return;
+
     const correctGerman = allWords[currentIdx].de;
+
     if (chosen === correctGerman) {
-      Alert.alert(
-        'Correct!',
-        `"${allWords[currentIdx].original}" → "${correctGerman}"`,
-        [{ text: 'Next', onPress: () => pickNextWord() }]
-      );
+      // Mark correct in context
+      markWordCorrect(selectedCategoryIndex, currentIdx);
+
+      // Show “Correct!” in green
+      setFeedback('Correct!');
+      // After 2 seconds, clear feedback and go to next word
+      setTimeout(() => {
+        setFeedback('');
+        pickNextWord();
+      }, 2000);
     } else {
-      Alert.alert('Try again', `"${chosen}" is not correct.`, [{ text: 'OK' }]);
+      // Show “Wrong!” in red for 2 seconds, then clear
+      setFeedback('Wrong!');
+      setTimeout(() => {
+        setFeedback('');
+      }, 2000);
     }
   };
 
-  //
-  // 8) Render logic
-  //
+  // 9) Reveal answer handler
+  const revealAnswer = () => {
+    setShowAnswer(true);
+    // Optionally, hide after 2 seconds:
+    setTimeout(() => setShowAnswer(false), 2000);
+  };
 
-  // (a) No words at all
+  // 10) Render logic
+
+  // (a) No words in this category
   if (allWords.length === 0) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.noWordText}>
-          No words available in any category. Please add some first.
-        </Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <Text style={styles.noWordText}>
+            No words in this category. Please add some first.
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  // (b) If finished or we haven’t set currentIdx yet (i.e. waiting for initialization), show “Preparing quiz…”
+  // (b) If finished or waiting for first question
   if (finished || currentIdx === null) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.noWordText}>Preparing quiz…</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <Text style={styles.noWordText}>Preparing quiz…</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  // (c) Otherwise, show the current question and its four options
+  // (c) Otherwise show question
   const currentWord = allWords[currentIdx];
   return (
-    <View style={styles.container}>
-      <Text style={styles.prompt}>Translate the word:</Text>
-      <Text style={styles.original}>{currentWord.original}</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.headerRow}>
+          <Text style={styles.prompt}>Translate the word:</Text>
+          <TouchableOpacity onPress={revealAnswer} style={styles.eyeButton}>
+            <Ionicons name="eye" size={28} color="gray" />
+          </TouchableOpacity>
+        </View>
 
-      {options.map((opt, idx) => (
-        <TouchableOpacity
-          key={idx}
-          style={styles.button}
-          onPress={() => handleAnswer(opt)}
-        >
-          <Text style={styles.buttonText}>{opt}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
+        <Text style={styles.original}>{currentWord.original}</Text>
+
+        {/* 11) Inline feedback text */}
+        {!!feedback && (
+          <Text
+            style={[
+              styles.feedback,
+              feedback === 'Correct!' ? styles.correct : styles.wrong,
+            ]}
+          >
+            {feedback}
+          </Text>
+        )}
+
+        {/* 12) Show correct answer if requested */}
+        {showAnswer && (
+          <Text style={styles.revealText}>Answer: {currentWord.de}</Text>
+        )}
+
+        {/* 13) Answer options */}
+        {options.map((opt, idx) => (
+          <TouchableOpacity
+            key={idx}
+            style={[
+              styles.button,
+              !!feedback && styles.disabledButton,
+            ]}
+            onPress={() => handleAnswer(opt)}
+            disabled={!!feedback} // disable taps while feedback is showing
+          >
+            <Text style={styles.buttonText}>{opt}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
   container: {
     flex: 1,
     padding: 16,
     backgroundColor: '#fff',
     alignItems: 'center',
-    justifyContent: 'center',
+  },
+  headerRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  eyeButton: {
+    padding: 8,
   },
   prompt: {
     fontSize: 18,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   original: {
     fontSize: 24,
     fontWeight: '600',
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  feedback: {
+    fontSize: 20,
+    marginBottom: 16,
+  },
+  correct: {
+    color: 'green',
+  },
+  wrong: {
+    color: 'red',
+  },
+  revealText: {
+    fontSize: 18,
+    color: '#444',
+    marginBottom: 16,
   },
   button: {
     width: '80%',
@@ -289,6 +357,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#e0e0e0',
     borderRadius: 6,
     alignItems: 'center',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   buttonText: {
     fontSize: 18,
