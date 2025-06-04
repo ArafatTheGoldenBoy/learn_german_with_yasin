@@ -10,6 +10,7 @@ import TabNavigator from './src/navigation/TabNavigator';
 import AddCategoryScreen from './src/screens/AddCategoryScreen';
 import AddWordScreen from './src/screens/AddWordScreen';
 import WordListScreen from './src/screens/WordListScreen';
+import EditWordScreen from './src/screens/EditWordScreen';
 // (If you have other “Edit” screens, import them here as well)
 
 const Stack = createNativeStackNavigator();
@@ -24,6 +25,8 @@ export default function App() {
             screenOptions={{
               headerStyle: { backgroundColor: '#E53935' },
               headerTintColor: '#fff',
+              headerTitle: 'Translate Quiz',      // ← app name shown on all screens
+              headerTitleAlign: 'center',         // optional: center the title on iOS/Android
             }}
           >
             {/* 1) The two‐tab navigator */}
@@ -50,6 +53,11 @@ export default function App() {
               options={({ route }) => ({
                 title: route.params.categoryName || 'Words',
               })}
+            />
+            <Stack.Screen
+              name="EditWord"
+              component={EditWordScreen}
+              options={{ title: 'Edit Word' }}
             />
             {/* If you have an EditCategory or EditWord screen, add it here */}
           </Stack.Navigator>

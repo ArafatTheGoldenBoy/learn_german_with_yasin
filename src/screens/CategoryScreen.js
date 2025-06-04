@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   },
   name: {
     flex: 1,
-    fontSize: 18,
+    fontSize: 28,
   },
   count: {
     fontSize: 14,
