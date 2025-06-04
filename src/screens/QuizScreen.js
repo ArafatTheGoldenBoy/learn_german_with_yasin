@@ -255,7 +255,16 @@ export default function QuizScreen() {
       </SafeAreaView>
     );
   }
-
+  if (currentIdx < 0 || currentIdx >= allWords.length) {
+  // (Optionally you could console.warn here.)
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <Text style={styles.noWordText}>Preparing quiz…</Text>
+      </View>
+    </SafeAreaView>
+    );
+  }
   // (c) Otherwise show question
   const currentWord = allWords[currentIdx];
   return (
@@ -331,12 +340,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   original: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: '600',
     marginBottom: 16,
   },
   feedback: {
-    fontSize: 20,
+    fontSize: 28,
     marginBottom: 16,
   },
   correct: {
@@ -346,7 +355,7 @@ const styles = StyleSheet.create({
     color: 'red',
   },
   revealText: {
-    fontSize: 18,
+    fontSize: 28,
     color: '#444',
     marginBottom: 16,
   },
@@ -362,7 +371,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    fontSize: 18,
+    fontSize: 32,
   },
   noWordText: {
     fontSize: 16,

@@ -131,7 +131,23 @@ export const AppProvider = ({ children }) => {
       return next;
     });
   };
-
+  // Update one word in a category (by its index)
+  const updateWordInCategory = async (
+    categoryIdx,
+    wordIdx,
+    updatedWordObj
+  ) => {
+    const cat = categories[categoryIdx];
+    if (!cat) return;
+    const newWords = cat.words.map((w, i) =>
+      i === wordIdx ? { ...w, ...updatedWordObj } : w
+    );
+    const newCats = categories.map((c, i) =>
+      i === categoryIdx ? { ...c, words: newWords } : c
+    );
+    await persistCategories(newCats);
+    setCategories(newCats);
+  };
   // Delete a word (by its index in the selected category)
   const deleteWordFromCategory = async (categoryIdx, wordIdx) => {
     const cat = categories[categoryIdx];
@@ -195,6 +211,7 @@ export const AppProvider = ({ children }) => {
         deleteCategory,
         addManualWordToCategory,
         deleteWordFromCategory,
+        updateWordInCategory,
         // Quiz progress:
         quizAnswered,       // the map { [catIdx]: Set(wordIdx) }
         markWordCorrect,
