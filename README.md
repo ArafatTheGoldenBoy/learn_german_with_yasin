@@ -18,6 +18,9 @@ All the words across all the categories are grouped into one pool.
 The vocabulary is shuffled and each word appears once in English, together with four German-language alternatives (a single correct one and three distractors).
 As soon as the user responds, the following word is revealed.
 After all the words have been quizzed, an “All Done" option requests to begin again using a freshly shuffled pool.
+### Activity diagram of this app
+![activity diagram of this app](https://github.com/user-attachments/assets/a32f6981-5888-4f79-a06c-9085ed69ea93)
+
 
 ## Main Screens & Navigation
 
