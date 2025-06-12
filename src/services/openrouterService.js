@@ -1,59 +1,96 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import Constants from 'expo-constants';
 
-const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL    = 'gpt-3.5-turbo';
-const KEY      = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
-const PREFIX   = '@synant-v2:';            // new cache namespace
+/* ❶ ── API-key from .env or expo.extra -------------------------------- */
+const KEY =
+  process.env.EXPO_PUBLIC_OPENROUTER_API_KEY ||
+  Constants?.expoConfig?.extra?.EXPO_PUBLIC_OPENROUTER_API_KEY;
 
-/** strict fallback obj */
-const emptyItem = { en:'–', de:'–', bn:'–', ex:'–' };
-const emptyOut  = { synonyms:[emptyItem], antonyms:[emptyItem] };
+/* ❷ ── Priority list: paid GPT-3.5 then free pools -------------------- */
+const MODELS = [
+  'google/gemma-3n-e4b-it:free',
+  'deepseek/deepseek-r1-0528-qwen3-8b:free',
+  'nousresearch/nous-hermes-2-mixtral-8x7b-sft:free',
+  'gryphe/mythomax-l2:free',
+];
 
-/** helper to hit cache first, then OpenRouter */
-export async function getSynAnt(word) {
-  const w = word.trim().toLowerCase();
-  if (!w) return emptyOut;
+const ENDPOINT   = 'https://openrouter.ai/api/v1/chat/completions';
+const ROSTER_URL = 'https://openrouter.ai/api/v1/models'; // still used for ttl cache if needed
+const WORD_PRE   = '@synant-cache:';                    // per-word cache
 
-  // ① cache
-  const cached = await AsyncStorage.getItem(PREFIX + w);
-  if (cached) return JSON.parse(cached);
+/* ❸ ── placeholders ---------------------------------------------------- */
+const FILL  = { en: '–', de: '–', bn: '–' };
+const EMPTY = { example: '–', synonyms: [FILL], antonyms: [FILL] };
 
-  // ② if key missing / offline
-  if (!KEY) return emptyOut;
+const sleep  = (ms) => new Promise(r => setTimeout(r, ms));
+const strip  = (t) => (t.match(/\{[\s\S]*\}/) || ['{}'])[0];
+const top3   = (arr=[]) => arr.slice(0,3).map(o => ({ ...FILL, ...o }));
 
-  // ③ build prompt
-  const prompt =
-    `Respond ONLY in strict JSON: {"synonyms":[{en,de,bn,ex}], "antonyms":[{en,de,bn,ex}]}.\n` +
-    `Give up to 5 English synonyms *and* up to 5 antonyms for "${w}".\n` +
-    `For every synonym & antonym provide:\n` +
-    `• "de": single-word German translation\n` +
-    `• "bn": single-word Bengali translation (Bangla script)\n` +
-    `• "ex": one short German example sentence that uses the German word.\n`;
+/* ──────────────────────────────────────────────────────────────────────
+   getSynAnt(word)   → { example, synonyms:[{en,de,bn}], antonyms:[…] }
+────────────────────────────────────────────────────────────────────── */
+export async function getSynAnt(rawWord) {
+  const word = rawWord.trim().toLowerCase();
+  if (!word) return EMPTY;
 
-  try {
-    const res = await axios.post(
-      ENDPOINT,
-      { model: MODEL, messages:[{role:'user', content:prompt}], temperature:0.3 },
-      { headers:{Authorization:`Bearer ${KEY}`,'Content-Type':'application/json'}, timeout:15000 }
-    );
+  /* A ─ cache hit */
+  const hit = await AsyncStorage.getItem(WORD_PRE + word);
+  if (hit) return JSON.parse(hit);
 
-    const parsed = JSON.parse(res.data.choices[0].message.content.trim());
-
-    // sanitise + shrink to 3 each
-    const pick = list => (Array.isArray(list) && list.length
-      ? list.slice(0,3).map(o=>({...emptyItem, ...o}))
-      : [emptyItem]);
-
-    const out = {
-      synonyms : pick(parsed.synonyms),
-      antonyms : pick(parsed.antonyms),
-    };
-
-    await AsyncStorage.setItem(PREFIX + w, JSON.stringify(out));   // save
-    return out;
-  } catch (e) {
-    console.warn('OpenRouter err:', e.message || e);
-    return emptyOut;
+  if (!KEY) {
+    console.warn('OpenRouter key missing');
+    return EMPTY;
   }
+
+  /* B ─ prompt (single example sentence) */
+  const prompt =
+    'Return ONLY this JSON schema:\n' +
+    '{ "example": "<German sentence using ORIGINAL German word>",\n' +
+    '  "synonyms":[{"en":"","de":"","bn":""}],\n' +
+    '  "antonyms":[{"en":"","de":"","bn":""}] }\n\n' +
+    `Give up to 5 synonyms and 5 antonyms for the English word "${word}".`;
+
+  /* C ─ iterate over model list */
+  for (const model of MODELS) {
+    try {
+      const res = await axios.post(
+        ENDPOINT,
+        {
+          model,
+          response_format: { type: 'json_object' },
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+        },
+        {
+          headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+          timeout: 15000,
+        }
+      );
+
+      const json = JSON.parse(strip(res.data.choices[0].message.content));
+
+      const value = {
+        example : json.example || '–',
+        synonyms: top3(json.synonyms),
+        antonyms: top3(json.antonyms),
+      };
+
+      await AsyncStorage.setItem(WORD_PRE + word, JSON.stringify(value));
+      return value;                                    // ✅  success
+    } catch (err) {
+      const code = err.response?.status;
+      const msg  = err.response?.data?.error?.message || err.message;
+      console.warn(`${model} → ${code ?? '?'} ${msg}`);
+
+      if (code === 401 || code === 402) continue;              // unauth / no credit
+      if (code === 404 || code === 400) continue;              // invalid id
+      if (code === 429 && msg?.includes('free-models-per-day')) continue;
+      if (code === 429) await sleep(5000);                     // generic 429
+      continue;                                                // try next
+    }
+  }
+
+  console.warn('All pools failed  → placeholder');
+  return EMPTY;
 }
