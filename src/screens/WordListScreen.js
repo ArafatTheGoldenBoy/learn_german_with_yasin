@@ -1,18 +1,7 @@
-// src/screens/WordListScreen.js
-import React, {
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-} from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
+  View, Text, FlatList, TouchableOpacity,
+  StyleSheet, Alert, ActivityIndicator
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import NetInfo from '@react-native-community/netinfo';
@@ -20,143 +9,92 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 
 import { AppContext } from '../context/AppContext';
-import { getSynAnt } from '../services/openrouterService';   // cached helper
+import { getSynAnt } from '../services/openrouterService';
 
-// ───────────────────────────────────────────────
-// WordListScreen
-// ───────────────────────────────────────────────
+/* ────────────────────────────────────────────── */
 export default function WordListScreen({ route, navigation }) {
   const { categoryIndex } = route.params;
-  const {
-    categories,
-    deleteWordFromCategory,
-    setSelectedCategoryIndex,
-  } = useContext(AppContext);
+  const { categories, deleteWordFromCategory, setSelectedCategoryIndex } = useContext(AppContext);
 
-  /* 1️⃣ mark selected category */
-  useEffect(() => {
-    setSelectedCategoryIndex(categoryIndex);
-  }, [categoryIndex]);
-
-  /* 2️⃣ category */
+  /* mark category */
+  useEffect(() => setSelectedCategoryIndex(categoryIndex), [categoryIndex]);
   const cat = categories[categoryIndex] || { words: [] };
 
-  /* 3️⃣ header */
-  useEffect(() => {
-    navigation.setOptions({ headerTitle: `Words: ${cat.name || ''}` });
-  }, [navigation, cat]);
-
+  /* header */
+  useEffect(() => navigation.setOptions({ headerTitle: `Words: ${cat.name || ''}` }), [navigation, cat]);
   useFocusEffect(React.useCallback(() => {}, [categories]));
 
-  /* 4️⃣ online / offline */
+  /* online flag */
   const [isConnected, setIsConnected] = useState(null);
   useEffect(() => {
-    const unsub = NetInfo.addEventListener((s) =>
-      setIsConnected(s.isConnected)
-    );
-    NetInfo.fetch().then((s) => setIsConnected(s.isConnected));
+    const unsub = NetInfo.addEventListener(s => setIsConnected(s.isConnected));
+    NetInfo.fetch().then(s => setIsConnected(s.isConnected));
     return () => unsub();
   }, []);
 
-  /* 5️⃣ results cache: index → { synonyms, antonyms } */
+  /* result map */
   const [resultsMap, setResultsMap] = useState({});
 
-  /* 6️⃣ fetch (or cached) */
-  const fetchForWord = useCallback(async (word, idx) => {
-    const w = word.trim();
-    if (!w) {
-      setResultsMap((p) => ({
-        ...p,
-        [idx]: { synonyms: [], antonyms: [] },
-      }));
-      return;
-    }
-    try {
-      const out = await getSynAnt(w); // cached helper
-      setResultsMap((p) => ({ ...p, [idx]: out }));
-    } catch {
-      setResultsMap((p) => ({
-        ...p,
-        [idx]: { synonyms: [], antonyms: [] },
-      }));
-    }
-  }, []);
-
-  /* 7️⃣ refetch on list change */
+  /* sequential fetch with 2 s gap */
   useEffect(() => {
-    setResultsMap({});
-    cat.words.forEach((w, idx) => fetchForWord(w.original, idx));
-  }, [cat.words, isConnected, fetchForWord]);
+    let cancel = false;
+    (async () => {
+      setResultsMap({});
+      for (let i = 0; i < cat.words.length; i++) {
+        if (cancel) break;
+        const out = await getSynAnt(cat.words[i].original);
+        setResultsMap(prev => ({ ...prev, [i]: out }));
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    })();
+    return () => (cancel = true);
+  }, [cat.words, isConnected]);
 
-  // ── actions ───────────────────────────────────
-  const del = (idx) =>
-    Alert.alert(
-      'Delete Word',
-      `Remove “${cat.words[idx].original}” from “${cat.name}”?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => deleteWordFromCategory(categoryIndex, idx),
-        },
-      ]
-    );
-  const edit = (idx) =>
-    navigation.navigate('EditWord', { categoryIndex, wordIndex: idx });
+  /* swipe actions */
+  const del = idx => Alert.alert(
+    'Delete Word', `Remove “${cat.words[idx].original}” from “${cat.name}”?`,
+    [
+      { text:'Cancel', style:'cancel' },
+      { text:'Delete', style:'destructive',
+        onPress:() => deleteWordFromCategory(categoryIndex, idx) }
+    ]
+  );
+  const edit = idx => navigation.navigate('EditWord', { categoryIndex, wordIndex: idx });
 
-  const rightActions = (idx) => (
+  const Right = idx => (
     <View style={styles.rightWrap}>
-      <TouchableOpacity
-        style={[styles.actionBtn, styles.editBtn]}
-        onPress={() => edit(idx)}
-      >
+      <TouchableOpacity style={[styles.btn, styles.editBtn]} onPress={() => edit(idx)}>
         <Ionicons name="create-outline" size={24} color="#fff" />
       </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.actionBtn, styles.delBtn]}
-        onPress={() => del(idx)}
-      >
+      <TouchableOpacity style={[styles.btn, styles.delBtn]} onPress={() => del(idx)}>
         <Ionicons name="trash" size={24} color="#fff" />
       </TouchableOpacity>
     </View>
   );
 
-  // ── row renderer ──────────────────────────────
-  const renderItem = ({ item, index }) => {
-    const eng = item.original || '–';
-    const de  = item.de || '–';
+  const List = (arr, style) => arr.slice(0, 3).map((o,i)=>(
+    <Text key={style+i} style={style}>• {o.en} → {o.de} / {o.bn}</Text>
+  ));
 
-    const data = resultsMap[index];          // might be undefined
-    const loading = data === undefined;      // show spinner until filled
-
-    /* helpers */
-    const renderList = (arr, style) =>
-      (arr || []).slice(0, 3).map((o, i) => (
-        <Text key={style + i} style={style}>
-          • {o.en} → {o.de} / {o.bn} {'\n'}  ex: {o.ex}
-        </Text>
-      ));
+  const RenderItem = ({ item, index }) => {
+    const data = resultsMap[index];
+    const loading = data === undefined;
 
     return (
-      <Swipeable overshootRight={false}
-                 renderRightActions={() => rightActions(index)}>
+      <Swipeable overshootRight={false} renderRightActions={() => Right(index)}>
         <View style={styles.row}>
-          <Text style={styles.original}>{eng}</Text>
-          <Text style={styles.translation}>DE: {de}</Text>
+          <Text style={styles.original}>{item.original}</Text>
+          <Text style={styles.translation}>DE: {item.de || '–'}</Text>
 
           {loading ? (
-            <ActivityIndicator
-              style={{ marginTop: 6 }}
-              size="small"
-              color="#888"
-            />
+            <ActivityIndicator style={{marginTop:6}} size="small" color="#888" />
           ) : (
             <>
+              <Text style={styles.example}>{data.example}</Text>
               <Text style={styles.section}>Synonym ⇢</Text>
-              {renderList(data.synonyms, styles.synLine)}
+              {List(data.synonyms, styles.synLine)}
               <Text style={styles.section}>Antonym ⇢</Text>
-              {renderList(data.antonyms, styles.antLine)}
+              {List(data.antonyms, styles.antLine)}
             </>
           )}
 
@@ -168,7 +106,7 @@ export default function WordListScreen({ route, navigation }) {
     );
   };
 
-  // ── main render ───────────────────────────────
+  /* main */
   return (
     <View style={styles.container}>
       {cat.words.length === 0 ? (
@@ -176,56 +114,45 @@ export default function WordListScreen({ route, navigation }) {
       ) : (
         <FlatList
           data={cat.words}
-          keyExtractor={(_, i) => i.toString()}
-          renderItem={renderItem}
+          keyExtractor={(_,i)=>i.toString()}
+          renderItem={RenderItem}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
         />
       )}
 
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => navigation.navigate('AddWord', { categoryIndex })}
-      >
+        onPress={()=>navigation.navigate('AddWord',{categoryIndex})}>
         <Ionicons name="add" size={28} color="#fff" />
       </TouchableOpacity>
     </View>
   );
 }
 
-// ───────────────────────────────────────────────
-// styles
-// ───────────────────────────────────────────────
+/* ────────────────────────────────────────────── */
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex:1, backgroundColor:'#fff' },
 
-  row:         { padding: 16, backgroundColor: '#fff' },
-  original:    { fontSize: 20, fontWeight: '500' },
-  translation: { fontSize: 16, color: '#555', marginTop: 4 },
+  row:{ padding:16, backgroundColor:'#fff' },
+  original:{ fontSize:20, fontWeight:'500' },
+  translation:{ fontSize:16, color:'#555', marginTop:4 },
 
-  section:  { fontWeight: '600', marginTop: 6, color: '#007AFF' },
-  synLine:  { fontSize: 14, marginLeft: 4 },
-  antLine:  { fontSize: 14, marginLeft: 4, color: '#d00' },
+  example:{ fontSize:14, fontStyle:'italic', marginTop:6, color:'#444' },
+  section:{ fontWeight:'600', marginTop:6, color:'#007AFF' },
+  synLine:{ fontSize:14, marginLeft:4 },
+  antLine:{ fontSize:14, marginLeft:4, color:'#d00' },
 
-  chevron: { position: 'absolute', right: 16, top: 18 },
+  chevron:{ position:'absolute', right:16, top:18 },
 
-  empty: { marginTop: 32, textAlign: 'center', color: '#999', fontSize: 16 },
-  sep:   { height: 1, backgroundColor: '#eee' },
+  empty:{ marginTop:32, textAlign:'center', color:'#999', fontSize:16 },
+  sep:{ height:1, backgroundColor:'#eee' },
 
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    backgroundColor: '#007AFF',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-  },
+  fab:{ position:'absolute', bottom:24, right:24, backgroundColor:'#007AFF',
+        width:56, height:56, borderRadius:28, justifyContent:'center',
+        alignItems:'center', elevation:4 },
 
-  rightWrap:  { flexDirection: 'row', width: 120 },
-  actionBtn:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  editBtn:    { backgroundColor: '#007bff' },
-  delBtn:     { backgroundColor: '#dc3545' },
+  rightWrap:{ flexDirection:'row', width:120 },
+  btn:{ flex:1, justifyContent:'center', alignItems:'center' },
+  editBtn:{ backgroundColor:'#007bff' },
+  delBtn:{ backgroundColor:'#dc3545' },
 });
