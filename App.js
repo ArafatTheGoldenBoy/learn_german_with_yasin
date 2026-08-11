@@ -10,6 +10,7 @@ import AddCategoryScreen from './src/screens/AddCategoryScreen';
 import AddWordScreen from './src/screens/AddWordScreen';
 import WordListScreen from './src/screens/WordListScreen';
 import EditWordScreen from './src/screens/EditWordScreen';
+import FlashCardScreen from './src/screens/FlashCardScreen';
 // (If you have other “Edit” screens, import them here as well)
 
 const Stack = createNativeStackNavigator();
@@ -34,6 +35,11 @@ export default function App() {
               component={TabNavigator}
               options={{ headerShown: false }}
             />
+            <Stack.Screen
+              name="FlashCard"
+              component={FlashCardScreen}
+              options={{ title: 'Flash Card' }}
+            />
 
             {/* 2) Add / Edit flows pop up on top of the tabs */}
             <Stack.Screen
@@ -50,7 +56,7 @@ export default function App() {
               name="WordList"
               component={WordListScreen}
               options={({ route }) => ({
-                title: route.params.categoryName || 'Words',
+                title: route.params?.categoryName || 'Words',
               })}
             />
             <Stack.Screen

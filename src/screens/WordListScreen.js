@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity,
+  View, Text, FlatList, TouchableOpacity, Pressable,
   StyleSheet, Alert, ActivityIndicator
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { AppContext } from '../context/AppContext';
 import { getSynAnt } from '../services/openrouterService';
-
+import { getCard } from '../services/flashcardService';
 /* ────────────────────────────────────────────── */
 export default function WordListScreen({ route, navigation }) {
   const { categoryIndex } = route.params;
@@ -42,8 +42,9 @@ export default function WordListScreen({ route, navigation }) {
       setResultsMap({});
       for (let i = 0; i < cat.words.length; i++) {
         if (cancel) break;
-        const out = await getSynAnt(cat.words[i].original);
-        setResultsMap(prev => ({ ...prev, [i]: out }));
+        const api = await getSynAnt(cat.words[i].original);
+        const card = await getCard(cat.words[i].original);    // NEW
+        setResultsMap((p) => ({ ...p, [i]: { api, card } }));
         await new Promise(r => setTimeout(r, 2000));
       }
     })();
@@ -72,29 +73,41 @@ export default function WordListScreen({ route, navigation }) {
     </View>
   );
 
-  const List = (arr, style) => arr.slice(0, 3).map((o,i)=>(
+  const List = (arr, style) => (Array.isArray(arr) ? arr : []).slice(0, 3).map((o, i) =>(
     <Text key={style+i} style={style}>• {o.en} → {o.de} / {o.bn}</Text>
   ));
 
-  const RenderItem = ({ item, index }) => {
-    const data = resultsMap[index];
-    const loading = data === undefined;
+ const RenderItem = ({ item, index }) => {
+  const data    = resultsMap[index];
+  const loading = data === undefined;
 
-    return (
-      <Swipeable overshootRight={false} renderRightActions={() => Right(index)}>
+  return (
+    <Swipeable
+      overshootRight={false}
+      renderRightActions={() => Right(index)}
+    >
+      {/* 🔸  Pressable wraps the whole visible row  */}
+      <Pressable
+        android_ripple={{ color: '#e5e5e5' }}
+        onPress={() =>
+          navigation.navigate('FlashCard', {
+            entry: { ...item, api:   data?.api   ?? {},     card:  data?.card  ?? {} },
+          })
+        }
+      >
         <View style={styles.row}>
           <Text style={styles.original}>{item.original}</Text>
           <Text style={styles.translation}>DE: {item.de || '–'}</Text>
 
           {loading ? (
-            <ActivityIndicator style={{marginTop:6}} size="small" color="#888" />
+            <ActivityIndicator style={{ marginTop: 6 }} size="small" color="#888" />
           ) : (
             <>
-              <Text style={styles.example}>{data.example}</Text>
+              <Text style={styles.example}>{data.api?.example}</Text>
               <Text style={styles.section}>Synonym ⇢</Text>
-              {List(data.synonyms, styles.synLine)}
+              {List(data.api?.synonyms, styles.synLine)}
               <Text style={styles.section}>Antonym ⇢</Text>
-              {List(data.antonyms, styles.antLine)}
+              {List(data.api?.antonyms, styles.antLine)}
             </>
           )}
 
@@ -102,9 +115,11 @@ export default function WordListScreen({ route, navigation }) {
             <Ionicons name="chevron-forward" size={20} color="#ccc" />
           </View>
         </View>
-      </Swipeable>
-    );
-  };
+      </Pressable>
+    </Swipeable>
+  );
+};
+
 
   /* main */
   return (

@@ -8,6 +8,7 @@ import AddWordScreen from '../screens/AddWordScreen';
 import AddCategoryScreen from '../screens/AddCategoryScreen';
 import RenameCategoryScreen from '../screens/RenameCategoryScreen';
 import QuizScreen from '../screens/QuizScreen';
+import FlashCardScreen from '../screens/FlashCardScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -22,6 +23,11 @@ export default function RootNavigator() {
         name="WordList"
         component={WordListScreen}
         options={{ headerShown: true, title: 'Words' }}
+      />
+      <Stack.Screen
+        name="FlashCard"
+        component={FlashCardScreen}
+        options={{ headerShown: true, title: 'Flash Card' }}
       />
 
       {/* Add Word (manual entry) */}

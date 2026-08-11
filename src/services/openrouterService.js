@@ -9,6 +9,7 @@ const KEY =
 
 /* ❷ ── Priority list: paid GPT-3.5 then free pools -------------------- */
 const MODELS = [
+  'openai/gpt-3.5-turbo',
   'google/gemma-3n-e4b-it:free',
   'deepseek/deepseek-r1-0528-qwen3-8b:free',
   'nousresearch/nous-hermes-2-mixtral-8x7b-sft:free',
@@ -16,7 +17,6 @@ const MODELS = [
 ];
 
 const ENDPOINT   = 'https://openrouter.ai/api/v1/chat/completions';
-const ROSTER_URL = 'https://openrouter.ai/api/v1/models'; // still used for ttl cache if needed
 const WORD_PRE   = '@synant-cache:';                    // per-word cache
 
 /* ❸ ── placeholders ---------------------------------------------------- */
@@ -94,3 +94,40 @@ export async function getSynAnt(rawWord) {
   console.warn('All pools failed  → placeholder');
   return EMPTY;
 }
+
+/* after MODELS, KEY, ENDPOINT definitions */
+export async function callFreeLLM(prompt) {
+  if (!KEY) throw new Error('OpenRouter key missing');
+
+  for (const model of MODELS) {
+    try {
+      const { data } = await axios.post(
+        ENDPOINT,
+        {
+          model,
+          response_format: { type: 'json_object' },
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        }
+      );
+
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (!text) throw new Error('empty content');
+      return text;                                    // success
+    } catch (e) {
+      const code = e.response?.status;
+      const msg  = e.response?.data?.error?.message || e.message;
+      console.warn(`${model} → ${code ?? '?'} ${msg}`);
+      if ([400, 401, 402, 404, 429].includes(code)) continue; // try next
+    }
+  }
+  throw new Error('all free LLM pools failed');
+}
+
