@@ -78,10 +78,15 @@ export const AppProvider = ({ children }) => {
     await persistCategories(newCats);
     setCategories(newCats);
 
-    // Remove its quizAnswered entry
+    // Drop its quizAnswered entry and shift the higher category keys down,
+    // so progress stays attached to the right category after the splice
     setQuizAnswered((prev) => {
-      const next = { ...prev };
-      delete next[index];
+      const next = {};
+      for (const key of Object.keys(prev)) {
+        const catIdx = Number(key);
+        if (catIdx === index) continue;
+        next[catIdx > index ? catIdx - 1 : catIdx] = prev[catIdx];
+      }
       return next;
     });
 
@@ -161,18 +166,15 @@ export const AppProvider = ({ children }) => {
 
     // If that word was answered, remove it from quizAnswered
     setQuizAnswered((prev) => {
-      const next = { ...prev };
-      if (next[categoryIdx]) {
-        next[categoryIdx].delete(wordIdx);
-        // Also shift down any higher indices in that Set by 1
-        const updatedSet = new Set(
-          Array.from(next[categoryIdx]).map((idx) =>
-            idx > wordIdx ? idx - 1 : idx
-          )
-        );
-        next[categoryIdx] = updatedSet;
+      const answered = prev[categoryIdx];
+      if (!answered) return prev;
+      // Build a fresh Set rather than mutating the one the previous state holds
+      const shifted = new Set();
+      for (const idx of answered) {
+        if (idx === wordIdx) continue;
+        shifted.add(idx > wordIdx ? idx - 1 : idx);
       }
-      return next;
+      return { ...prev, [categoryIdx]: shifted };
     });
   };
 
@@ -182,12 +184,9 @@ export const AppProvider = ({ children }) => {
   // Mark a word (by its index in that category) as answered correctly
   const markWordCorrect = (categoryIdx, wordIdx) => {
     setQuizAnswered((prev) => {
-      const next = { ...prev };
-      if (!next[categoryIdx]) {
-        next[categoryIdx] = new Set();
-      }
-      next[categoryIdx].add(wordIdx);
-      return next;
+      const answered = new Set(prev[categoryIdx] ?? []);
+      answered.add(wordIdx);
+      return { ...prev, [categoryIdx]: answered };
     });
   };
 
